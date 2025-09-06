@@ -1029,4 +1029,633 @@
                 }
                 
                 // Check if email already exists
-                if
+                if (users.find(user => user.email === userData.email)) {
+                    return { success: false, message: "Email already registered" };
+                }
+                
+                // Check if phone already exists
+                if (users.find(user => user.phone === userData.phone)) {
+                    return { success: false, message: "Phone number already registered" };
+                }
+                
+                // Create new user
+                const newUser = {
+                    id: users.length > 0 ? Math.max(...users.map(u => u.id)) + 1 : 1,
+                    name: userData.name,
+                    email: userData.email,
+                    phone: userData.phone,
+                    password: userData.password, // In real app, this would be hashed
+                    createdAt: new Date().toISOString()
+                };
+                
+                users.push(newUser);
+                localStorage.setItem('ecofinds_users', JSON.stringify(users));
+                
+                // Auto login
+                this.currentUser = newUser;
+                localStorage.setItem('ecofinds_currentUser', JSON.stringify(newUser));
+                this.updateAuthUI();
+                
+                return { success: true, user: newUser };
+            },
+            
+            loginUser: function(login, password) {
+                const users = JSON.parse(localStorage.getItem('ecofinds_users'));
+                const user = users.find(u => 
+                    (u.email === login || u.phone === login) && 
+                    u.password === password
+                );
+                
+                if (user) {
+                    this.currentUser = user;
+                    localStorage.setItem('ecofinds_currentUser', JSON.stringify(user));
+                    this.updateAuthUI();
+                    return { success: true, user };
+                } else {
+                    return { success: false, message: "Invalid login credentials" };
+                }
+            },
+            
+            logoutUser: function() {
+                this.currentUser = null;
+                localStorage.removeItem('ecofinds_currentUser');
+                this.updateAuthUI();
+            },
+            
+            updateAuthUI: function() {
+                const authLink = document.getElementById('auth-link');
+                if (this.currentUser) {
+                    authLink.textContent = 'Logout';
+                    authLink.dataset.page = 'logout';
+                    document.getElementById('add-product-btn').style.display = 'inline-block';
+                    document.getElementById('add-listing-btn').style.display = 'inline-block';
+                } else {
+                    authLink.textContent = 'Login';
+                    authLink.dataset.page = 'login';
+                    document.getElementById('add-product-btn').style.display = 'none';
+                    document.getElementById('add-listing-btn').style.display = 'none';
+                }
+            },
+            
+            // Product management
+            getProducts: function() {
+                return JSON.parse(localStorage.getItem('ecofinds_products'));
+            },
+            
+            addProduct: function(productData) {
+                const products = JSON.parse(localStorage.getItem('ecofinds_products'));
+                const newProduct = {
+                    id: products.length > 0 ? Math.max(...products.map(p => p.id)) + 1 : 1,
+                    title: productData.title,
+                    category: productData.category,
+                    description: productData.description,
+                    price: parseFloat(productData.price),
+                    image: productData.image,
+                    userId: this.currentUser.id,
+                    createdAt: new Date().toISOString()
+                };
+                
+                products.push(newProduct);
+                localStorage.setItem('ecofinds_products', JSON.stringify(products));
+                return newProduct;
+            },
+            
+            getUserProducts: function() {
+                if (!this.currentUser) return [];
+                const products = JSON.parse(localStorage.getItem('ecofinds_products'));
+                return products.filter(p => p.userId === this.currentUser.id);
+            },
+            
+            // Cart management
+            getCart: function() {
+                if (!this.currentUser) return [];
+                const cart = JSON.parse(localStorage.getItem('ecofinds_cart'));
+                return cart.filter(item => item.userId === this.currentUser.id);
+            },
+            
+            addToCart: function(productId) {
+                if (!this.currentUser) return { success: false, message: "Please login first" };
+                
+                const cart = JSON.parse(localStorage.getItem('ecofinds_cart'));
+                const existingItem = cart.find(item => 
+                    item.productId === productId && item.userId === this.currentUser.id
+                );
+                
+                if (existingItem) {
+                    existingItem.quantity += 1;
+                } else {
+                    cart.push({
+                        id: cart.length > 0 ? Math.max(...cart.map(i => i.id)) + 1 : 1,
+                        productId: productId,
+                        userId: this.currentUser.id,
+                        quantity: 1,
+                        addedAt: new Date().toISOString()
+                    });
+                }
+                
+                localStorage.setItem('ecofinds_cart', JSON.stringify(cart));
+                this.updateCartCount();
+                return { success: true };
+            },
+            
+            updateCartCount: function() {
+                const cart = this.getCart();
+                const totalItems = cart.reduce((total, item) => total + item.quantity, 0);
+                document.querySelector('.cart-count').textContent = `(${totalItems})`;
+            },
+            
+            // Purchase management
+            getPurchases: function() {
+                if (!this.currentUser) return [];
+                const purchases = JSON.parse(localStorage.getItem('ecofinds_purchases'));
+                return purchases.filter(p => p.userId === this.currentUser.id);
+            }
+        };
+
+        // UI Controller
+        const EcoFindsUI = {
+            init: function() {
+                this.bindEvents();
+                EcoFindsDB.init();
+                this.showPage('home');
+                this.renderProducts();
+                EcoFindsDB.updateCartCount();
+            },
+            
+            bindEvents: function() {
+                // Navigation
+                document.querySelectorAll('.nav-link').forEach(link => {
+                    link.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        if (link.dataset.page === 'logout') {
+                            EcoFindsDB.logoutUser();
+                            this.showPage('home');
+                            this.showNotification('Logged out successfully');
+                        } else {
+                            this.showPage(link.dataset.page);
+                        }
+                    });
+                });
+                
+                // Mobile menu
+                document.querySelector('.mobile-menu-btn').addEventListener('click', () => {
+                    document.querySelector('.nav-links').classList.toggle('active');
+                });
+                
+                // Auth forms
+                document.getElementById('switch-to-signup').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.showPage('signup');
+                });
+                
+                document.getElementById('switch-to-login').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.showPage('login');
+                });
+                
+                document.getElementById('login-form').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const login = document.getElementById('login-email').value;
+                    const password = document.getElementById('login-password').value;
+                    
+                    const result = EcoFindsDB.loginUser(login, password);
+                    if (result.success) {
+                        this.showPage('home');
+                        this.renderProducts();
+                        this.showNotification('Logged in successfully');
+                    } else {
+                        this.showNotification(result.message, true);
+                    }
+                });
+                
+                document.getElementById('signup-form').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const name = document.getElementById('signup-name').value;
+                    const email = document.getElementById('signup-email').value;
+                    const phone = document.getElementById('signup-phone').value;
+                    const password = document.getElementById('signup-password').value;
+                    const confirmPassword = document.getElementById('signup-confirm-password').value;
+                    
+                    const result = EcoFindsDB.registerUser({ name, email, phone, password, confirmPassword });
+                    if (result.success) {
+                        this.showPage('home');
+                        this.renderProducts();
+                        this.showNotification('Account created successfully');
+                    } else {
+                        this.showNotification(result.message, true);
+                    }
+                });
+                
+                // Product management
+                document.getElementById('add-product-btn').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (!EcoFindsDB.currentUser) {
+                        this.showPage('login');
+                    } else {
+                        this.showPage('add-product');
+                    }
+                });
+                
+                document.getElementById('add-listing-btn').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (!EcoFindsDB.currentUser) {
+                        this.showPage('login');
+                    } else {
+                        this.showPage('add-product');
+                        document.getElementById('add-product-form').reset();
+                        document.getElementById('add-product-form').dataset.editId = '';
+                        document.querySelector('#add-product-page .page-title h2').textContent = 'Add New Product';
+                        document.querySelector('#add-product-page button[type="submit"]').textContent = 'Submit Listing';
+                        document.getElementById('product-category').value = '';
+                        document.getElementById('product-image').value = '';
+                        document.getElementById('product-description').value = '';
+                        document.getElementById('product-price').value = '';
+                        document.getElementById('product-title').value = '';
+                        document.getElementById('product-title').focus();
+                        document.getElementById('product-category').selectedIndex = 0;
+                    }
+                });
+                
+                document.getElementById('add-product-form').addEventListener('submit', (e) => {
+                    e.preventDefault();
+                    const title = document.getElementById('product-title').value;
+                    const category = document.getElementById('product-category').value;
+                    const description = document.getElementById('product-description').value;
+                    const price = document.getElementById('product-price').value;
+                    const image = document.getElementById('product-image').value;
+                    
+                    const product = EcoFindsDB.addProduct({ title, category, description, price, image });
+                    this.showNotification('Product listed successfully!');
+                    this.showPage('my-listings');
+                    this.renderUserProducts();
+                });
+                
+                // Search and filter
+                document.getElementById('search-input').addEventListener('keyup', () => {
+                    this.renderProducts();
+                });
+                
+                document.getElementById('category-filter').addEventListener('change', () => {
+                    this.renderProducts();
+                });
+
+                // Hero explore button
+                document.getElementById('hero-explore-btn').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    document.getElementById('search-input').focus();
+                });
+            },
+            
+            showPage: function(pageId) {
+                // Hide all pages
+                document.querySelectorAll('.page-section').forEach(page => {
+                    page.classList.remove('active');
+                });
+                
+                // Show requested page
+                document.getElementById(`${pageId}-page`).classList.add('active');
+                
+                // Update navigation
+                document.querySelectorAll('.nav-link').forEach(link => {
+                    link.classList.remove('active');
+                    if (link.dataset.page === pageId) {
+                        link.classList.add('active');
+                    }
+                });
+                
+                // Page-specific initialization
+                switch(pageId) {
+                    case 'home':
+                        this.renderProducts();
+                        break;
+                    case 'my-listings':
+                        this.renderUserProducts();
+                        break;
+                    case 'dashboard':
+                        this.renderDashboard();
+                        break;
+                    case 'cart':
+                        this.renderCart();
+                        break;
+                    case 'purchases':
+                        this.renderPurchases();
+                        break;
+                }
+            },
+            
+            renderProducts: function() {
+                const productsContainer = document.getElementById('products-container');
+                const searchTerm = document.getElementById('search-input').value.toLowerCase();
+                const categoryFilter = document.getElementById('category-filter').value;
+                
+                let products = EcoFindsDB.getProducts();
+                
+                // Apply filters
+                if (searchTerm) {
+                    products = products.filter(p => 
+                        p.title.toLowerCase().includes(searchTerm) || 
+                        p.description.toLowerCase().includes(searchTerm)
+                    );
+                }
+                
+                if (categoryFilter) {
+                    products = products.filter(p => p.category === categoryFilter);
+                }
+                
+                // Render products
+                productsContainer.innerHTML = '';
+                
+                if (products.length === 0) {
+                    productsContainer.innerHTML = '<div class="card"><p>No products found. Try adjusting your search filters.</p></div>';
+                    return;
+                }
+                
+                products.forEach(product => {
+                    const productEl = document.createElement('div');
+                    productEl.className = 'product-card';
+                    productEl.innerHTML = `
+                        <div class="product-image">
+                            <img src="${product.image}" alt="${product.title}">
+                        </div>
+                        <div class="product-info">
+                            <h3 class="product-title">${product.title}</h3>
+                            <p class="product-price">$${product.price.toFixed(2)}</p>
+                            <p class="product-category">${product.category}</p>
+                            <div class="product-actions">
+                                <a href="#" class="btn view-product" data-id="${product.id}">View Details</a>
+                                <a href="#" class="btn-secondary add-to-cart" data-id="${product.id}"><i class="fas fa-cart-plus"></i></a>
+                            </div>
+                        </div>
+                    `;
+                    productsContainer.appendChild(productEl);
+                });
+                
+                // Add event listeners to new elements
+                document.querySelectorAll('.view-product').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const productId = parseInt(btn.dataset.id);
+                        this.showProductDetail(productId);
+                    });
+                });
+                
+                document.querySelectorAll('.add-to-cart').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const productId = parseInt(btn.dataset.id);
+                        if (!EcoFindsDB.currentUser) {
+                            this.showPage('login');
+                        } else {
+                            const result = EcoFindsDB.addToCart(productId);
+                            if (result.success) {
+                                // Visual feedback
+                                const originalHtml = btn.innerHTML;
+                                btn.innerHTML = '<i class="fas fa-check"></i> Added';
+                                btn.style.backgroundColor = '#2a9d8f';
+                                this.showNotification('Product added to cart!');
+                                
+                                setTimeout(() => {
+                                    btn.innerHTML = originalHtml;
+                                    btn.style.backgroundColor = '';
+                                }, 1500);
+                            } else {
+                                this.showNotification(result.message, true);
+                            }
+                        }
+                    });
+                });
+            },
+            
+            renderUserProducts: function() {
+                const container = document.getElementById('my-listings-container');
+                const products = EcoFindsDB.getUserProducts();
+                
+                container.innerHTML = '';
+                
+                if (products.length === 0) {
+                    container.innerHTML = `
+                        <div class="card">
+                            <p>You haven't listed any products yet.</p>
+                            <a href="#" class="btn" id="add-first-product">Add Your First Product</a>
+                        </div>
+                    `;
+                    
+                    document.getElementById('add-first-product').addEventListener('click', (e) => {
+                        e.preventDefault();
+                        this.showPage('add-product');
+                    });
+                    
+                    return;
+                }
+                
+                products.forEach(product => {
+                    const productEl = document.createElement('div');
+                    productEl.className = 'product-card';
+                    productEl.innerHTML = `
+                        <div class="product-image">
+                            <img src="${product.image}" alt="${product.title}">
+                        </div>
+                        <div class="product-info">
+                            <h3 class="product-title">${product.title}</h3>
+                            <p class="product-price">$${product.price.toFixed(2)}</p>
+                            <p class="product-category">${product.category}</p>
+                            <div class="product-actions">
+                                <a href="#" class="btn edit-product" data-id="${product.id}">Edit</a>
+                                <a href="#" class="btn btn-danger delete-product" data-id="${product.id}">Delete</a>
+                            </div>
+                        </div>
+                    `;
+                    container.appendChild(productEl);
+                });
+                
+                // Add event listeners
+                document.querySelectorAll('.edit-product').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const productId = parseInt(btn.dataset.id);
+                        this.editProduct(productId);
+                    });
+                });
+                
+                document.querySelectorAll('.delete-product').forEach(btn => {
+                    btn.addEventListener('click', (e) => {
+                        e.preventDefault();
+                        const productId = parseInt(btn.dataset.id);
+                        if (confirm('Are you sure you want to delete this product?')) {
+                            this.deleteProduct(productId);
+                        }
+                    });
+                });
+            },
+            
+            showProductDetail: function(productId) {
+                const products = EcoFindsDB.getProducts();
+                const product = products.find(p => p.id === productId);
+                
+                if (!product) return;
+                
+                const detailPage = document.getElementById('product-detail-page');
+                detailPage.innerHTML = `
+                    <div class="card">
+                        <a href="#" class="btn back-btn" style="margin-bottom: 20px;"><i class="fas fa-arrow-left"></i> Back</a>
+                        <div style="display: flex; gap: 20px; margin-bottom: 20px;">
+                            <div style="flex: 1;">
+                                <div class="product-image">
+                                    <img src="${product.image}" alt="${product.title}">
+                                </div>
+                            </div>
+                            <div style="flex: 1;">
+                                <h2>${product.title}</h2>
+                                <p class="product-price">$${product.price.toFixed(2)}</p>
+                                <p class="product-category">${product.category}</p>
+                                <p>${product.description}</p>
+                                <div style="margin-top: 20px;">
+                                    <a href="#" class="btn add-to-cart-detail" data-id="${product.id}"><i class="fas fa-cart-plus"></i> Add to Cart</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                
+                // Add event listeners
+                detailPage.querySelector('.back-btn').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    this.showPage('home');
+                });
+                
+                detailPage.querySelector('.add-to-cart-detail').addEventListener('click', (e) => {
+                    e.preventDefault();
+                    if (!EcoFindsDB.currentUser) {
+                        this.showPage('login');
+                    } else {
+                        const result = EcoFindsDB.addToCart(productId);
+                        if (result.success) {
+                            this.showNotification('Product added to cart!');
+                        } else {
+                            this.showNotification(result.message, true);
+                        }
+                    }
+                });
+                
+                this.showPage('product-detail');
+            },
+            
+            renderCart: function() {
+                const container = document.getElementById('cart-items-container');
+                const cart = EcoFindsDB.getCart();
+                const products = EcoFindsDB.getProducts();
+                
+                container.innerHTML = '';
+                
+                if (cart.length === 0) {
+                    container.innerHTML = '<div class="card"><p>Your cart is empty.</p></div>';
+                    document.getElementById('cart-total').textContent = '0.00';
+                    document.getElementById('checkout-btn').style.display = 'none';
+                    return;
+                }
+                
+                document.getElementById('checkout-btn').style.display = 'inline-block';
+                
+                let total = 0;
+                
+                cart.forEach(item => {
+                    const product = products.find(p => p.id === item.productId);
+                    if (!product) return;
+                    
+                    const itemTotal = product.price * item.quantity;
+                    total += itemTotal;
+                    
+                    const itemEl = document.createElement('div');
+                    itemEl.className = 'cart-item';
+                    itemEl.innerHTML = `
+                        <div class="cart-item-image">
+                            <img src="${product.image}" alt="${product.title}">
+                        </div>
+                        <div class="cart-item-details">
+                            <h3>${product.title}</h3>
+                            <p class="product-price">$${product.price.toFixed(2)}</p>
+                            <p class="product-category">${product.category}</p>
+                        </div>
+                        <div class="cart-item-actions">
+                            <p>Quantity: ${item.quantity}</p>
+                            <p>Total: $${itemTotal.toFixed(2)}</p>
+                        </div>
+                    `;
+                    container.appendChild(itemEl);
+                });
+                
+                document.getElementById('cart-total').textContent = total.toFixed(2);
+                
+                // Checkout button
+                document.getElementById('checkout-btn').addEventListener('click', () => {
+                    if (confirm('Proceed with checkout?')) {
+                        this.showNotification('Thank you for your purchase!');
+                        // Clear cart
+                        const allCart = JSON.parse(localStorage.getItem('ecofinds_cart'));
+                        const userCart = allCart.filter(item => item.userId !== EcoFindsDB.currentUser.id);
+                        localStorage.setItem('ecofinds_cart', JSON.stringify(userCart));
+                        EcoFindsDB.updateCartCount();
+                        this.renderCart();
+                    }
+                });
+            },
+            
+            renderDashboard: function() {
+                if (!EcoFindsDB.currentUser) return;
+                
+                document.getElementById('dashboard-username').textContent = EcoFindsDB.currentUser.name;
+                document.getElementById('dashboard-email').textContent = EcoFindsDB.currentUser.email;
+                document.getElementById('dashboard-phone').textContent = EcoFindsDB.currentUser.phone;
+                
+                const userProducts = EcoFindsDB.getUserProducts();
+                document.getElementById('listings-count').textContent = userProducts.length;
+                
+                // These would come from actual purchase data in a real app
+                document.getElementById('sold-count').textContent = '0';
+                document.getElementById('purchased-count').textContent = '0';
+            },
+            
+            renderPurchases: function() {
+                const container = document.getElementById('purchases-container');
+                const purchases = EcoFindsDB.getPurchases();
+                
+                container.innerHTML = '';
+                
+                if (purchases.length === 0) {
+                    container.innerHTML = '<div class="card"><p>You haven\'t made any purchases yet.</p></div>';
+                    return;
+                }
+                
+                // This would display actual purchase history in a real app
+                purchases.forEach(purchase => {
+                    const purchaseEl = document.createElement('div');
+                    purchaseEl.className = 'card';
+                    purchaseEl.innerHTML = `
+                        <h3>Order #${purchase.id}</h3>
+                        <p>Date: ${new Date(purchase.date).toLocaleDateString()}</p>
+                        <p>Total: $${purchase.total.toFixed(2)}</p>
+                        <p>Status: ${purchase.status}</p>
+                    `;
+                    container.appendChild(purchaseEl);
+                });
+            },
+
+            showNotification: function(message, isError = false) {
+                const notification = document.getElementById('notification');
+                notification.textContent = message;
+                notification.className = 'notification' + (isError ? ' error' : '');
+                notification.classList.add('show');
+                
+                setTimeout(() => {
+                    notification.classList.remove('show');
+                }, 3000);
+            }
+        };
+
+        // Initialize the app
+        document.addEventListener('DOMContentLoaded', function() {
+            EcoFindsUI.init();
+        });
+    </script>
+</body>
+</html>
